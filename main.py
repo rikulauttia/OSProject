@@ -1,53 +1,8 @@
 import os
-import random
-import multiprocessing
 from multiprocessing import shared_memory, Pipe
-
-# Function for child processes to generate a random integer number between 0-19 and sending that to parent.
-def child_process(pipe_end, process_name):
-    random_priority = random.randint(0, 19)
-    print(f"{process_name}: Generated priority {random_priority}")
-    pipe_end.send(random_priority)  # Send the priority to the parent through the pipe
-    pipe_end.close()  # Close the pipe after sending
-
-# Parent process (init).
-def parent_process(pipe_ends, shared_mem_name):
-    priorities = []
-    # Receiving priorities from each child through pipes
-    print("Parent: Waiting to receive data from children...")
-    for i, pipe_end in enumerate(pipe_ends):
-        priority = pipe_end.recv()  # Receive priority from child
-        print(f"Parent: Received priority {priority} from child P{i+1}")
-        priorities.append(priority)
-        pipe_end.close()
-
-    # Attaching to shared memory to write priorities
-    print("Parent: Writing data to shared memory...")
-    shm = shared_memory.SharedMemory(name=shared_mem_name)
-    # The parent process attaches to an existing shared memory segment that
-    # was created in the main() function, using the provided shared_mem_name.
-
-    # Writing the priorities to shared memory as bytes
-    shm.buf[:len(priorities)] = bytearray(priorities)
-    #shm.buf is a buffer interface to the shared memory, and by converting the list of
-    #priorities into a bytearray, we can store the data in the memory buffer as raw bytes.
-    #The [:len(priorities)] part ensures that the parent writes exactly as many bytes as there are priorities.
-    print(f"Parent: Data written to shared memory: {priorities}")
-    shm.close()
-
-# Scheduler process reads shared memory, sorts priorities, and prints them
-def scheduler_process(shared_mem_name):
-    print("Scheduler: Attaching to shared memory...")
-    shm = shared_memory.SharedMemory(name=shared_mem_name)
-    # Read data from shared memory
-    # shm.buf[:4]:The scheduler reads the first 4 bytes from shared memory, 
-    # which represent the priorities of the child processes.
-    priorities = list(shm.buf[:4]) 
-    print(f"Scheduler: Priorities read from shared memory: {priorities}")
-    # Sorting the priorities
-    sorted_priorities = sorted(priorities)
-    print(f"Scheduler: Sorted priorities: {sorted_priorities}")
-    shm.close()
+from parent_process import parent_process
+from scheduler_process import scheduler_process
+from child_process import child_process
 
 # Main function to set up the processes and shared memory
 def main():
@@ -91,17 +46,22 @@ def main():
 
     # Parent (init) process handles communication and writes to shared memory
     parent_process(pipe_parents, shared_mem.name)
+    #The parent process (init) has already forked the child processes (P1–P4) 
+    #and now needs to receive the priorities from these child processes.
 
     # Fork the scheduler process
     print("Main: Forking scheduler process...")
     scheduler_pid = os.fork()
-    if scheduler_pid == 0:
+    if scheduler_pid == 0: #This block of code checks whether we are inside the forked process
         # Scheduler process reads from shared memory
         print("Scheduler: Forked successfully")
         scheduler_process(shared_mem.name)
         os._exit(0)
 
-    # Waiting for all child processes to finish
+    # In this code, the parent process waits for each child (P1–P4) to finish one by one before moving forward.
+    # It ensures that all child processes complete their tasks before proceeding.
+    # After that, the parent waits for the Scheduler process to finish as well, ensuring that everything is
+    # done before the program moves on to clean up the shared memory.
     print("Main: Waiting for child processes to finish...")
     for pid in child_pids:
         os.waitpid(pid, 0)
